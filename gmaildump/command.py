@@ -2,10 +2,10 @@ import base64
 import json
 import time
 import threading
+
 import tornado.httpserver
 import tornado.ioloop
 import tornado.web
-
 from basescript import BaseScript
 
 import util
@@ -48,10 +48,10 @@ class GmailCommand(BaseScript):
         :rtype : str, dict
 
         Eg:
-        t = 'forwarder=gmaildump.messagestore.SQLiteStore:db_name=gmail_sqlite:table_name=gmail_dump_sqlit'
+        t = 'forwarder=gmaildump.messagestore.SQLiteStore:db_name=gmail_sqlite:table_name=gmail_dump_sqlite'
         return
              path = gmaildump.messagestore.SQLiteStore
-             args = {'db_name': 'gmail_sqlite', 'table_name': 'gmail_dump_sqlit'}
+             args = {'db_name': 'gmail_sqlite', 'table_name': 'gmail_dump_sqlite'}
 
         '''
 
