@@ -15,9 +15,18 @@ from gmailhistory import GmailHistory
 class RequestHandler(tornado.web.RequestHandler):
     '''
     Get's realtime messages through gmail pub/sub webhooks
-    #TODO : write proper doc string
+    
     '''
     def post(self):
+        '''POST response format
+        {
+        message:
+              {
+              // This is the actual notification data, as base64url-encoded JSON.
+             data: "eyJlbWFpbEFkZHJlc3MiOiAidXNlckBleGFtcGxlLmNvbSIsICJoaXN0b3J5SWQiOiAiMTIzNDU2Nzg5MCJ9",
+              }
+        }
+        '''
         data = json.loads(self.request.body)
 
         log = self.application.log
