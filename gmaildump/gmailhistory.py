@@ -1,10 +1,10 @@
 import base64
-from multiprocessing.pool import ThreadPool
 from copy import deepcopy
 from datetime import datetime, timedelta
 from apiclient.discovery import build
 from httplib2 import Http
 from oauth2client import file, client, tools
+from multiprocessing.pool import ThreadPool
 
 from deeputil import Dummy, AttrDict
 from diskdict import DiskDict
@@ -72,7 +72,6 @@ class GmailHistory(object):
         Message that may contain attachments
         :calls : GET https://www.googleapis.com/gmail/v1/users/userId/messages/messageId/attachments/id
         :param message : dict
-
         '''
         self.log.debug('save file')
 
@@ -116,7 +115,6 @@ class GmailHistory(object):
         >>> obj.gmail.users().history().list().execute = Mock(obj.gmail.users().history().list().execute,return_value=sample_doc)
         >>> obj.get_new_msg()
         [{'labelIds': ['UNREAD'], 'id': '163861dac0f17c61'}]
-
         '''
         self.log.debug('get history id')
 
@@ -160,7 +158,6 @@ class GmailHistory(object):
         >>> obj.gmail.users().watch().execute = Mock(obj.gmail.users().watch().execute, return_value=api_doc)
         >>> obj.watch_gmail()
         {'expiration': 1526901631234, 'historyId': 1234}
-
         '''
         self.log.debug('watch_gmail')
 
@@ -179,7 +176,6 @@ class GmailHistory(object):
 
         :param target : db_obj
         :param msg : dict
-
         '''
         self.log.debug('send msgs to tatgets')
 
@@ -189,7 +185,6 @@ class GmailHistory(object):
         '''syncronus pushing of messages to db
 
         :param msg: dict
-
         '''
         self.log.debug('write msgs in db')
 
@@ -206,7 +201,6 @@ class GmailHistory(object):
     def change_diskdict_state(self, message):
         '''change the state of diskdict
         :param message : dict
-
         '''
 
         self.dd['last_msg_ts'] = message['internalDate']
@@ -223,7 +217,6 @@ class GmailHistory(object):
 
         :params msgs_list : list
         :calls : GET https://www.googleapis.com/gmail/v1/users/userId/messages/id
-
         '''
         self.log.debug('store_msgs_in_db')
 
@@ -242,7 +235,6 @@ class GmailHistory(object):
         '''
         Gives next day date from current day
         :rtype: str(returns tommorrow date)
-
         '''
         self.log.debug('fun get ts with extened time')
 
@@ -251,7 +243,7 @@ class GmailHistory(object):
     def get_history(self, before, after=GMAIL_CREATED_TS):
         '''
         Get all the msgs from the user's mailbox with in given dates and store in the db
-        *Note : Gmail api will consider 'before' : excluded date, 'after' : included date
+        :Note : Gmail api will consider 'before' : excluded date, 'after' : included date
 
         :ref : https://developers.google.com/gmail/api/guides/filtering
         :calls : GET https://www.googleapis.com/gmail/v1/users/userId/messages
@@ -268,7 +260,6 @@ class GmailHistory(object):
         >>> obj.store_msgs_in_db = Mock()
         >>> obj.get_history('2017/05/10')
         [{'id': '163861dac0f17c61'}, {'id': '1632163b6a84ab94'}]
-
         '''
         self.log.debug('fun get history')
 
@@ -284,11 +275,9 @@ class GmailHistory(object):
 
         while 'nextPageToken' in response:
             page_token = response.nextPageToken
-            response = self.gmail.users().messages().list(
-                userId='me',
-                maxResults=self.MAX_RESULTS,
-                q=query,
-                pageToken=page_token).execute()
+            response = self.gmail.users().messages().list(userId='me',
+                       maxResults=self.MAX_RESULTS, q=query,
+                       pageToken=page_token).execute()
             response = AttrDict(response)
 
             if response.resultSizeEstimate is not 0:
@@ -305,12 +294,10 @@ class GmailHistory(object):
         >>> obj=GmailHistory()
         >>> obj.get_oldest_date('1526901630000')
         '2018/05/22'
-
         '''
         self.log.debug('get oldest date')
 
-        return (datetime.fromtimestamp(
-            int(ts[:10])) + timedelta(days=1)).strftime('%Y/%m/%d')
+        return (datetime.fromtimestamp(int(ts[:10])) + timedelta(days=1)).strftime('%Y/%m/%d')
 
     def get_latest_date(self, ts):
         '''
@@ -320,7 +307,6 @@ class GmailHistory(object):
         >>> obj=GmailHistory()
         >>> obj.get_latest_date('1526901630000')
         '2018/05/21'
-
         '''
         self.log.debug('get latest date')
 
@@ -329,18 +315,15 @@ class GmailHistory(object):
     def start(self):
         self.log.debug('start')
 
-        # Gets next day date from current date and check for last_msg_ts key in
-        # diskdict
+        # Gets next day date from current date and check for last_msg_ts key in diskdict
         before_ts = self.get_default_ts()
         last_msg_ts = self.dd.get('last_msg_ts', 0)
 
-        # If any messages present, get the last_msg_ts and replace before_ts
-        # with the last_msg_ts
+        # If last_msg_ts present in diskdict, get ts and replace before_ts with the last_msg_ts in 'yr/m/d' format.
         if last_msg_ts:
             before_ts = self.get_oldest_date(last_msg_ts)
 
-        # Get and store the messages from before_ts to the time gmail has
-        # created
+        # Get and store the messages from before_ts to the time gmail has created
         self.get_history(before_ts)
         self.dd['tmp_ts'] = self.dd['last_msg_ts']
 
