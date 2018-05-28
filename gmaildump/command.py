@@ -16,7 +16,6 @@ class RequestHandler(tornado.web.RequestHandler):
     '''
     Get's realtime messages through gmail pub/sub webhooks
     #TODO : write proper doc string
-
     '''
     def post(self):
         data = json.loads(self.request.body)
@@ -52,7 +51,6 @@ class GmailCommand(BaseScript):
         return
              path = gmaildump.messagestore.SQLiteStore
              args = {'db_name': 'gmail_sqlite', 'table_name': 'gmail_dump_sqlite'}
-
         '''
 
         path, args = t.split(':', 1)
@@ -65,7 +63,6 @@ class GmailCommand(BaseScript):
     def msg_store(self):
         '''
         :rtype : list
-
         '''
         targets = []
 
@@ -84,7 +81,6 @@ class GmailCommand(BaseScript):
         expiration field with the timestamp for the watch expiration.
 
         :ref : https://developers.google.com/gmail/api/guides/push
-
         '''
         while True:
             self.get_gmail_obj().watch_gmail()
