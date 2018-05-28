@@ -20,9 +20,9 @@ class GmailHistory(object):
 
     '''
 
-    MAX_RESULTS = 500     # gmail api max results
-    LABELIDS = ['INBOX']  #labels to which, pub/sub updates are  pushed
-    GMAIL_CREATED_TS = '2004/01/01'
+    MAX_RESULTS = 500                 # gmail api max results
+    LABELIDS = ['INBOX']              # labels to which, pub/sub updates are  pushed
+    GMAIL_CREATED_TS = '2004/01/01'   # year in which gmail was introduced
     SCOPES = 'https://www.googleapis.com/auth/gmail.readonly'
 
     def __init__(self, cred_path=None, topic_name=None,
