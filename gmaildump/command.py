@@ -46,13 +46,13 @@ class RequestHandler(tornado.web.RequestHandler):
 
 class GmailCommand(BaseScript):
 
-    DESC = 'A tool to get the data from gmail and store it in database'
+    DESC = 'A tool to get the data or msgs from gmail and store it in database'
 
-    GMAIL_WATCH_DELAY = 86400
+    GMAIL_WATCH_DELAY = 86400    # time in seconds to call gmail api's watch function
 
     def _parse_msg_target_arg(self, t):
         '''
-        :param t : str
+        :param t : str(targeted database)
         :rtype : str, dict
 
         Eg:
@@ -71,7 +71,9 @@ class GmailCommand(BaseScript):
 
     def msg_store(self):
         '''
+        This fun returns targeted dbs objects in list
         :rtype : list
+        
         '''
         targets = []
 
@@ -85,17 +87,22 @@ class GmailCommand(BaseScript):
 
     def watch_gmail(self):
         '''Renewing mailbox watch
+        
         You must re-call watch() at least every 7 days or else you will stop receiving pub/sub updates for the user.
         We recommend calling watch() once per day. The watch() response also has an
         expiration field with the timestamp for the watch expiration.
 
         :ref : https://developers.google.com/gmail/api/guides/push
+        
         '''
         while True:
             self.get_gmail_obj().watch_gmail()
             time.sleep(self.GMAIL_WATCH_DELAY)
 
     def listen_realtime(self):
+        '''
+        Function to get realtime msgs through gmail api webhooks    
+        '''
         self.log.info('Running tornodo on the machine')
 
         app = tornado.web.Application(handlers=[(r'/', RequestHandler)])
@@ -112,7 +119,7 @@ class GmailCommand(BaseScript):
                              file_path=self.args.file_path,
                              status_path=self.args.status_path,
                              targets=targets, log=self.log)
-        gmail.authorize()
+        gmail.authorize()   #authorizing gmail service in order to make gmail api calls
         return gmail
 
     def run(self):
@@ -126,23 +133,24 @@ class GmailCommand(BaseScript):
     def define_args(self, parser):
         # gmail api arguments
         parser.add_argument('-cred', '--credentials_path',
-                            metavar='usr_credentials_path',
+                            required=True,
                             help='directory path to get the client \
                             secret and credential files for gmail \
                             api authentication')
         parser.add_argument('-gmail_topic', '--sub_topic',
-                            metavar='subscription_topic',
-                            help='User created topic to receive \
-                            webhooks or push notifications from pub/sub')
+                            required=True,
+                            help='The topic to which  \
+                            webhooks or push notifications has subscibed from pub/sub')
         parser.add_argument('-query', '--api_query',
-                            metavar='api_query', nargs='?',
                             default='',
-                            help='format :list:support@deepcompute.com')
+                            help='query to get required msgs,\
+                            eg: from:support@deepcompute.com, \
+                            ref:https://support.google.com/mail/answer/7190?hl=en')
 
         parser.add_argument('-f', '--file_path', metavar='file_path',
                             nargs='?', default=None,
                             help='The path of the directory where you\
-                            want to save gmail inbox attachments')
+                            want to save gmail inbox attachments(images,pdf..)')
 
         # diskdict arguments
         parser.add_argument('-status_path', '--status_path',
