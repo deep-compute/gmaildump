@@ -1,10 +1,11 @@
+import time
 import base64
+from multiprocessing.pool import ThreadPool
 from copy import deepcopy
 from datetime import datetime, timedelta
 from apiclient.discovery import build
 from httplib2 import Http
 from oauth2client import file, client, tools
-from multiprocessing.pool import ThreadPool
 
 from deeputil import Dummy, AttrDict
 from diskdict import DiskDict
@@ -20,13 +21,14 @@ class GmailHistory(object):
 
     '''
 
-    MAX_RESULTS = 500                 # gmail api max results
-    LABELIDS = ['INBOX']              # labels to which, pub/sub updates are  pushed
-    GMAIL_CREATED_TS = '2004/01/01'   # year in which gmail was introduced
-    SCOPES = 'https://www.googleapis.com/auth/gmail.readonly'
+    MAX_RESULTS = 500                   # gmail api max results
+    LABELIDS = ['INBOX']                # labels to which, pub/sub updates are to be pushed
+    GMAIL_CREATED_TS = '2004/01/01'     # year in which gmail has introduced
+    GMAIL_WATCH_DELAY = 86400           # time in sec to make gmail api watch() request
+    SCOPES = 'https://www.googleapis.com/auth/gmail.readonly' # type of permission to access gmail api
 
     def __init__(self, cred_path=None, topic_name=None,
-                 query=None, file_path=None, status_path='/tmp/',
+                 query='', file_path=None, status_path='/tmp/',
                  targets=None, log=DUMMY_LOG):
 
         self.log = log
@@ -41,6 +43,7 @@ class GmailHistory(object):
 
     def authorize(self):
         '''
+
         Gets valid user credentials from the user specified cred path
         if nothing has been stored, or if the stored credentials are invalid,
         the OAuth2 flow is incomplete and throws an authentication failed error or file not found error
@@ -51,29 +54,31 @@ class GmailHistory(object):
         credentials.json : This is the file that will be created when user has authenticated and
                            will mean you don't have to re-authenticate each time you connect to the API
         '''
-        self.log.debug('checking crdentials')
+        self.log.debug('authorize')
 
-        store = file.Storage('%scredentials.json' % (self.cred_path))
+        store = file.Storage('{}credentials.json'.format(self.cred_path))
         creds = store.get()
 
         if not creds or creds.invalid:
-            flow = client.flow_from_clientsecrets('%sclient_secret.json' %
-                                            (self.cred_path), self.SCOPES)
+            flow = client.flow_from_clientsecrets('{}client_secret.json'.format(self.cred_path),
+                                                 self.SCOPES)
             creds = tools.run_flow(flow, store)
 
         # build return gmail service object on authentication
         self.gmail = build('gmail', 'v1', http=creds.authorize(Http()),
                            cache_discovery=False)
 
+        return self.gmail
+
     def save_files(self, message):
         '''
-        Get and store attachments from given message.
+        This fun helps to store gmail attachments from the given message.
 
-        Message that may contain attachments
         :calls : GET https://www.googleapis.com/gmail/v1/users/userId/messages/messageId/attachments/id
         :param message : dict
+
         '''
-        self.log.debug('save file')
+        self.log.debug('save_file')
 
         for part in message['payload'].get('parts', ''):
 
@@ -90,18 +95,37 @@ class GmailHistory(object):
             with open(path, 'w') as file_obj:
                 file_obj.write(file_data)
 
-            self.log.info('saved path', path=path)
+            self.log.info('attachment saved to', path=path)
 
     def set_tmp_ts_to_last_msg(self):
-        self.log.debug('get history id')
+        '''
+
+        This fun help to reset last_msg_ts to tmp_ts
+
+        '''
+        self.log.debug('set_tmp_ts_to_last_msg')
 
         self.dd['last_msg_ts'] = self.dd['tmp_ts']
         self.dd.close()
 
+    def renew_mailbox_watch(self):
+        '''Renewing mailbox watch
+
+        You must re-call watch() at least every 7 days or else you will stop receiving pub/sub updates.
+        We recommend calling watch() once per day. The watch() response also has an
+        expiration field with the timestamp for the watch expiration.
+
+        :ref : https://developers.google.com/gmail/api/guides/push
+
+        '''
+        while True:
+            self.watch_gmail()
+            time.sleep(self.GMAIL_WATCH_DELAY)
+
     def get_new_msg(self):
         '''
-        List History of all changes to the user's mailbox and gives new msgs.
-        startHistoryId: Only return Histories or msgs after start_history_id.
+        This fun help us to see any changes to the user's mailbox and gives new msgs if they are available.
+        Note : startHistoryId - returns Histories(drafts, mail deletions, new mails) after start_history_id.
 
         :calls : GET https://www.googleapis.com/gmail/v1/users/userId/history
 
@@ -115,8 +139,9 @@ class GmailHistory(object):
         >>> obj.gmail.users().history().list().execute = Mock(obj.gmail.users().history().list().execute,return_value=sample_doc)
         >>> obj.get_new_msg()
         [{'labelIds': ['UNREAD'], 'id': '163861dac0f17c61'}]
+
         '''
-        self.log.debug('get history id')
+        self.log.debug('get_new_msg')
 
         msg_list = []
         new_msg = self.gmail.users().history().list(
@@ -146,7 +171,7 @@ class GmailHistory(object):
         '''To recive Push Notifications
 
         In order to receive notifications from Cloud Pub/Sub topic,
-        simply we can call watch() from google api clinet on the Gmail user mail box.
+        simply we can call watch() from google api client on the Gmail user mail box.
         :ref : https://developers.google.com/gmail/api/guides/push
 
         :calls : POST https://www.googleapis.com/gmail/v1/users/userId/watch
@@ -158,33 +183,39 @@ class GmailHistory(object):
         >>> obj.gmail.users().watch().execute = Mock(obj.gmail.users().watch().execute, return_value=api_doc)
         >>> obj.watch_gmail()
         {'expiration': 1526901631234, 'historyId': 1234}
+
         '''
         self.log.debug('watch_gmail')
 
         request = {
             'labelIds': self.LABELIDS,
-            'topicName': '%s' % (self.topic)
+            'topicName': '{}'.format(self.topic)
         }
 
         hstry_id = self.gmail.users().watch(userId='me', body=request).execute()
+
         self.log.info('Gmail_watch_id :', hstryid=hstry_id)
 
         return hstry_id
 
     def send_msgs_to_target(self, target, msg):
-        '''send msgs to db
+        '''
+        This fun helps to send msg to target database and store it.
 
         :param target : db_obj
         :param msg : dict
+
         '''
         self.log.debug('send msgs to tatgets')
 
         target.insert_msg(msg)
 
     def write_message(self, msg):
-        '''syncronus pushing of messages to db
+        '''
+        This function helps to push msgs to databases in asynchronous manner, if more than one db is specified.
 
         :param msg: dict
+
         '''
         self.log.debug('write msgs in db')
 
@@ -199,10 +230,14 @@ class GmailHistory(object):
                 j.wait()
 
     def change_diskdict_state(self, message):
-        '''change the state of diskdict
+        '''
+        This fun helps us to change the state of diskdict
+
         :param message : dict
+
         '''
 
+        # for every msg the last_msg_ts will be replace with new msg internalDate
         self.dd['last_msg_ts'] = message['internalDate']
 
         if 'frst_msg_ts' not in self.dd.keys() \
@@ -217,6 +252,7 @@ class GmailHistory(object):
 
         :params msgs_list : list
         :calls : GET https://www.googleapis.com/gmail/v1/users/userId/messages/id
+
         '''
         self.log.debug('store_msgs_in_db')
 
@@ -233,17 +269,20 @@ class GmailHistory(object):
 
     def get_default_ts(self):
         '''
-        Gives next day date from current day
-        :rtype: str(returns tommorrow date)
+        This fun helps to return next day date from today in Y/m/d format
+
+        :rtype: str
+
         '''
-        self.log.debug('fun get ts with extened time')
+        self.log.debug('get_default_ts')
 
         return (datetime.now() + timedelta(days=1)).strftime('%Y/%m/%d')
 
     def get_history(self, before, after=GMAIL_CREATED_TS):
         '''
         Get all the msgs from the user's mailbox with in given dates and store in the db
-        :Note : Gmail api will consider 'before' : excluded date, 'after' : included date
+        Note : Gmail api will consider 'before' : excluded date, 'after' : included date
+        Eg: before : 2017/01/01, after : 2017/01/31 then gmail api gives msgs from 2017/01/02 - 2017/01/31
 
         :ref : https://developers.google.com/gmail/api/guides/filtering
         :calls : GET https://www.googleapis.com/gmail/v1/users/userId/messages
@@ -260,10 +299,11 @@ class GmailHistory(object):
         >>> obj.store_msgs_in_db = Mock()
         >>> obj.get_history('2017/05/10')
         [{'id': '163861dac0f17c61'}, {'id': '1632163b6a84ab94'}]
+
         '''
         self.log.debug('fun get history')
 
-        query = '%s before:%s after:%s' % ((self.query, before, after))
+        query = '{} before:{} after:{}'.format(self.query, before, after)
         response = self.gmail.users().messages().list(
             userId='me', maxResults=self.MAX_RESULTS, q=query).execute()
         msgs = []
@@ -288,42 +328,51 @@ class GmailHistory(object):
 
     def get_oldest_date(self, ts):
         '''
+        This fun helps to get next day date from given timestamp.
+
         :param ts: str (Unix time stamp)
         :rtype: str
 
         >>> obj=GmailHistory()
         >>> obj.get_oldest_date('1526901630000')
         '2018/05/22'
-        '''
-        self.log.debug('get oldest date')
 
-        return (datetime.fromtimestamp(int(ts[:10])) + timedelta(days=1)).strftime('%Y/%m/%d')
+        '''
+        self.log.debug('get_oldest_date')
+
+        return (datetime.fromtimestamp(
+            int(ts[:10])) + timedelta(days=1)).strftime('%Y/%m/%d')
 
     def get_latest_date(self, ts):
         '''
+        This function helps us to get date from given timestamp
+
         :param ts: str (Unix time stamp)
         :rtype: str
 
         >>> obj=GmailHistory()
         >>> obj.get_latest_date('1526901630000')
         '2018/05/21'
+
         '''
-        self.log.debug('get latest date')
+        self.log.debug('get_latest_date')
 
         return (datetime.fromtimestamp(int(ts[:10]))).strftime('%Y/%m/%d')
 
     def start(self):
         self.log.debug('start')
 
-        # Gets next day date from current date and check for last_msg_ts key in diskdict
+        # Gets next day date from current date as before_ts in 'yr/m/d' format
+        # and check for last_msg_ts key in diskdict file
         before_ts = self.get_default_ts()
         last_msg_ts = self.dd.get('last_msg_ts', 0)
 
-        # If last_msg_ts present in diskdict, get ts and replace before_ts with the last_msg_ts in 'yr/m/d' format.
+        # If any messages present in diskdict, get the last_msg_ts value  and replace before_ts var with the
+        # last_msg_ts with 'yr/m/d' format
         if last_msg_ts:
             before_ts = self.get_oldest_date(last_msg_ts)
 
-        # Get and store the messages from before_ts to the time gmail has created
+        # Get and store the messages from before_ts date to the time gmail has created
         self.get_history(before_ts)
         self.dd['tmp_ts'] = self.dd['last_msg_ts']
 
@@ -331,4 +380,5 @@ class GmailHistory(object):
         after = self.get_latest_date(self.dd['frst_msg_ts'])
         self.get_history(self.get_default_ts(), after)
 
+        # reset last_msg_ts to temp_ts
         self.set_tmp_ts_to_last_msg()
