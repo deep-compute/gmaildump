@@ -5,7 +5,7 @@ import gnsq
 import sqlite3
 from deeputil import Dummy
 from diskdict import DiskDict
-from pymongo import MongoClient, ASCENDING, DESCENDING
+from pymongo import MongoClient
 
 DUMMY_LOG = Dummy
 

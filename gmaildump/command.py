@@ -13,68 +13,44 @@ from messagestore import *
 from gmailhistory import GmailHistory
 
 class RequestHandler(tornado.web.RequestHandler):
-    '''
-    Get's realtime messages through gmail pub/sub webhooks
-    
-    '''
+
+    DESC = 'Gets realtime messages through gmail pub/sub webhooks'
+
     def post(self):
-        '''POST response format
-        {
-        message:
-              {
-              // This is the actual notification data, as base64url-encoded JSON.
-             data: "eyJlbWFpbEFkZHJlc3MiOiAidXNlckBleGFtcGxlLmNvbSIsICJoaXN0b3J5SWQiOiAiMTIzNDU2Nzg5MCJ9",
-              }
-        }
+        '''
+        ref: https://developers.google.com/gmail/api/guides/push#receiving_notifications
+
         '''
         data = json.loads(self.request.body)
-
-        log = self.application.log
-        log.info('message received', msg=data)
-
         msg_data = base64.urlsafe_b64decode(str(data['message']['data']))
 
-        if 'historyId' not in msg_data:
-            return
+        if 'historyId' not in msg_data: return
 
         try:
             gmail = GmailCommand().get_gmail_obj()
             gmail.get_new_msg()
-        except IOError as err:
+        except IOError as err: # TODO: Diskdict error
             log.exception(err)
 
 
 class GmailCommand(BaseScript):
-
-    DESC = 'A tool to get the data or msgs from gmail and store it in database'
-
-    GMAIL_WATCH_DELAY = 86400    # time in seconds to call gmail api's watch function
+    DESC = 'A tool to get the data from gmail and store it in database'
 
     def _parse_msg_target_arg(self, t):
         '''
-        :param t : str(targeted database)
-        :rtype : str, dict
+        >>> from command import GmailCommand
+        >>> obj = GmailCommand()
+        >>> obj._parse_msg_target_arg('forwarder=gmaildump.messagestore.SQLiteStore:db_name=gmail_sqlite:table_name=gmail_dump_sqlit')
+        ('gmaildump.messagestore.SQLiteStore', {'db_name': 'gmail_sqlite', 'table_name': 'gmail_dump_sqlit'})
 
-        Eg:
-        t = 'forwarder=gmaildump.messagestore.SQLiteStore:db_name=gmail_sqlite:table_name=gmail_dump_sqlite'
-        return
-             path = gmaildump.messagestore.SQLiteStore
-             args = {'db_name': 'gmail_sqlite', 'table_name': 'gmail_dump_sqlite'}
         '''
-
         path, args = t.split(':', 1)
         path = path.split('=')[1]
         args = dict(a.split('=', 1) for a in args.split(':'))
-        args['log'] = self.log
 
         return path, args
 
     def msg_store(self):
-        '''
-        This fun returns targeted dbs objects in list
-        :rtype : list
-        
-        '''
         targets = []
 
         for t in self.args.target:
@@ -85,91 +61,83 @@ class GmailCommand(BaseScript):
 
         return targets
 
-    def watch_gmail(self):
-        '''Renewing mailbox watch
-        
-        You must re-call watch() at least every 7 days or else you will stop receiving pub/sub updates for the user.
-        We recommend calling watch() once per day. The watch() response also has an
-        expiration field with the timestamp for the watch expiration.
-
-        :ref : https://developers.google.com/gmail/api/guides/push
-        
-        '''
-        while True:
-            self.get_gmail_obj().watch_gmail()
-            time.sleep(self.GMAIL_WATCH_DELAY)
-
     def listen_realtime(self):
-        '''
-        Function to get realtime msgs through gmail api webhooks    
-        '''
         self.log.info('Running tornodo on the machine')
 
         app = tornado.web.Application(handlers=[(r'/', RequestHandler)])
-        app.log = self.log
         http_server = tornado.httpserver.HTTPServer(app)
-        http_server.listen(self.args.tornodo_port)
+        http_server.listen(self.args.tornodo-port)
         tornado.ioloop.IOLoop.instance().start()
 
     def get_gmail_obj(self):
         targets = self.msg_store()
-        gmail = GmailHistory(cred_path=self.args.credentials_path,
-                             query=self.args.api_query,
-                             topic_name=self.args.sub_topic,
-                             file_path=self.args.file_path,
-                             status_path=self.args.status_path,
+        gmail = GmailHistory(cred_path=self.args.credentials-path,
+                             query=self.args.api-query,
+                             topic_name=self.args.sub-topic,
+                             file_path=self.args.file-path,
+                             status_path=self.args.status-path,
                              targets=targets, log=self.log)
-        gmail.authorize()   #authorizing gmail service in order to make gmail api calls
+        gmail.authorize()    # authorizing gmail service in order to make gmail api calls
         return gmail
 
     def run(self):
-        self.get_gmail_obj().start()
-        th = threading.Thread(target=self.watch_gmail)
+        gmail = self.get_gmail_obj()
+
+        # start getting the gmail msgs from users mailbox
+        gmail.start()
+
+        # call gmail api watch request every day
+        th = threading.Thread(target=gmail.renew_mailbox_watch)
         th.daemon = True
         th.start()
         self.thread_watch_gmail = th
+
+        # listen for real time msgs on tornodo specified port
         self.listen_realtime()
 
     def define_args(self, parser):
         # gmail api arguments
-        parser.add_argument('-cred', '--credentials_path',
+        parser.add_argument('-cred', '--credentials-path',
                             required=True,
                             help='directory path to get the client \
                             secret and credential files for gmail \
                             api authentication')
-        parser.add_argument('-gmail_topic', '--sub_topic',
+        parser.add_argument('-gmail_topic', '--sub-topic',
                             required=True,
-                            help='The topic to which  \
+                            help='The topic to which \
                             webhooks or push notifications has subscibed from pub/sub')
-        parser.add_argument('-query', '--api_query',
-                            default='',
+        parser.add_argument('-query', '--api-query', nargs='?',
                             help='query to get required msgs,\
-                            eg: from:support@deepcompute.com, \
+                            eg: from: support@deepcompute.com\
                             ref:https://support.google.com/mail/answer/7190?hl=en')
 
-        parser.add_argument('-f', '--file_path', metavar='file_path',
-                            nargs='?', default=None,
-                            help='The path of the directory where you\
-                            want to save gmail inbox attachments(images,pdf..)')
+        # attachments arguments
+        parser.add_argument('-f', '--file-path',
+                            nargs='?',
+                            help='The path of the directory where user\
+                            want to save gmail inbox attachments. By default attachements \
+                            will not been stored')
 
         # diskdict arguments
-        parser.add_argument('-status_path', '--status_path',
-                           metavar='status_path', default=None,
+        parser.add_argument('-status_path', '--status-path',
+                           default='/tmp',
                            help='File path where the status of gmail \
-                           messages needs to be stored.')
+                           messages needs to be stored. Default path: /tmp/')
 
         # database arguments
         parser.add_argument('-target', '--target', nargs='+',
-               help='format for Mongo: store=<MongoStore-classpath>:db_name=<database-name>:collection_name=<collection-name> \
-               format for SQLite: store=<SQLiteStore-classpath>:host=<hostname>:port=<port-number>:db_name=<db-name>:table_name=<table-name>" \
-               format for NSQ: store=<NsqStore-classpath>:host=<hostname>:port=<port-number>:topic=<topic-name> \
-               format for file: store=<FileStore-classpath>:file_path=<file-path>')
+           help='format for Mongo: store=<MongoStore-classpath>:db_name=<database-name>:collection_name=<collection-name> \
+           format for SQLite: store=<SQLiteStore-classpath>:host=<hostname>:port=<port-number>:db_name=<db-name>:table_name=<table-name>" \
+           format for NSQ: store=<NsqStore-classpath>:host=<hostname>:port=<port-number>:topic=<topic-name> \
+           format for file: store=<FileStore-classpath>:file_path=<file-path>')
 
         # tornodo arguments
-        parser.add_argument('-tp', '--tornodo_port', metavar='tornodo_port',
+        parser.add_argument('-tp', '--tornodo-port',
                             nargs='?', default=8788,
-                            help='port in which tornodo needs to run')
-
+                            help='port in which tornodo needs to run to get realtime msgs\
+                            default port: 8788')
 
 def main():
     GmailCommand().start()
+
+
