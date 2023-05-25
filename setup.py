@@ -8,7 +8,7 @@ setup(
     keywords="gmaildump",
     install_requires=[
         "pymongo==2.7.2",
-        "tornado==4.5.3",
+        "tornado==6.3.2",
         "basescript==0.2.0",
         "deeputil==0.2.5",
         "gnsq==0.4.0",
